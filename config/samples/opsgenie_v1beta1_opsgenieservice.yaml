@@ -1,0 +1,12 @@
+apiVersion: opsgenie.macpaw.dev/v1beta1
+kind: OpsgenieService
+metadata:
+  name: api-desktop-service
+spec:
+  name: "API Desktop"
+  description: "desktop BFF"
+  teamRef:
+    name: sre-team # This references the OpsgenieTeam above
+  tags:
+    - "critical"
+    - "bff"

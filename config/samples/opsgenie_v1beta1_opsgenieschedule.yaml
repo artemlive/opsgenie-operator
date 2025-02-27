@@ -1,0 +1,47 @@
+apiVersion: opsgenie.macpaw.dev/v1beta1
+kind: OpsgenieSchedule
+metadata:
+  name: sre-oncall-schedule
+spec:
+  name: "SRE On-Call Schedule"
+  description: "Schedule for on-call SRE engineers"
+  timeZone: "Europe/Kiev"
+  ownerTeam: "SRE-production"
+  rotations:
+    - type: "weekly"
+      name: "regular"
+      startDate: "2025-02-26T00:00:00Z"
+      length: 1
+      participants:
+        - type: "team"
+          name: "SRE-production"
+    - type: "daily"
+      name: "boston"
+      startDate: "2025-02-26T08:00:00Z"
+      length: 1
+      participants:
+        - type: "team"
+          name: "SRE-production"
+      timeRestriction:
+        type: "weekday-and-time-of-day"
+        intervals:
+          - startDay: 1
+            endDay: 2 
+            startHour: 18 
+            endHour: 6
+          - startDay: 2 
+            endDay: 3
+            startHour: 18 
+            endHour: 6
+          - startDay: 3 
+            endDay: 4
+            startHour: 18 
+            endHour: 6
+          - startDay: 4 
+            endDay: 5 
+            startHour: 18 
+            endHour: 6
+          - startDay: 5 
+            endDay: 6 
+            startHour: 18 
+            endHour: 6

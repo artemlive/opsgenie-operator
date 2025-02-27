@@ -1,0 +1,30 @@
+apiVersion: opsgenie.macpaw.dev/v1beta1
+kind: OpsgenieEscalation
+metadata:
+  name: sre-escalation
+spec:
+  name: "SRE Escalation Policy"
+  description: "Escalation policy for SRE team"
+  teamRef:
+    name: sre-team
+  rules:
+    - condition: "if-not-acked"
+      notifyType: "default"
+      delayMin: 1 
+      recipient:
+        type: "user"
+        username: "artemlive@com"
+    - condition: "if-not-acked"
+      notifyType: "next"  # Next step should be a schedule
+      delayMin: 5 
+      recipient:
+        type: "schedule"  
+        scheduleRef:
+          name: sre-oncall-schedule
+    - condition: "if-not-acked"
+      notifyType: "all"  
+      delayMin: 10 
+      recipient:
+        type: "team"  
+        teamRef:
+          name: sre-team

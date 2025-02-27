@@ -1,0 +1,12 @@
+apiVersion: opsgenie.macpaw.dev/v1beta1
+kind: OpsgenieTeam
+metadata:
+  name: sre-team
+spec:
+  name: "SRE-production"
+  description: "Responsible for DB ops"
+  members:
+    - userId: "artemlive@com"
+      role: "admin"
+    - userId: "anasinnyk@com"
+      role: "admin"

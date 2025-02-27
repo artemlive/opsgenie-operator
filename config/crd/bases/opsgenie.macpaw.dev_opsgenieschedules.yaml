@@ -1,0 +1,177 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: opsgenieschedules.opsgenie.macpaw.dev
+spec:
+  group: opsgenie.macpaw.dev
+  names:
+    kind: OpsgenieSchedule
+    listKind: OpsgenieScheduleList
+    plural: opsgenieschedules
+    singular: opsgenieschedule
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.scheduleId
+      name: ScheduleID
+      type: string
+    - jsonPath: .status.status
+      name: Status
+      type: string
+    - jsonPath: .status.lastSyncedTime
+      name: Last Synced
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: OpsgenieSchedule is the Schema for the Opsgenie Schedules API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OpsgenieScheduleSpec defines the desired state of an Opsgenie
+              Schedule
+            properties:
+              description:
+                description: Description of the schedule
+                type: string
+              name:
+                description: Name of the schedule
+                type: string
+              ownerTeam:
+                description: OwnerTeam is the team responsible for the schedule
+                type: string
+              rotations:
+                description: Rotations define how the schedule is structured
+                items:
+                  description: OpsgenieRotation defines the rotation configuration
+                  properties:
+                    endDate:
+                      description: End date of the rotation (optional)
+                      type: string
+                    length:
+                      description: Length of each shift in the rotation
+                      type: integer
+                    name:
+                      description: Name of the rotation
+                      type: string
+                    participants:
+                      description: Participants in the rotation
+                      items:
+                        description: OpsgenieParticipant defines a user or team in
+                          the rotation
+                        properties:
+                          id:
+                            description: ID of the participant
+                            type: string
+                          name:
+                            description: Name of the participant (e.g., email for
+                              users, team name)
+                            type: string
+                          type:
+                            description: Type of participant (user, team, escalation,
+                              role)
+                            type: string
+                          username:
+                            description: Username for user participants (optional)
+                            type: string
+                        required:
+                        - type
+                        type: object
+                      type: array
+                    startDate:
+                      description: Start date of the rotation (ISO 8601 format)
+                      type: string
+                    timeRestriction:
+                      description: Time restrictions for the rotation (optional)
+                      properties:
+                        intervals:
+                          description: Time intervals when the rotation is active
+                          items:
+                            description: OpsgenieTimeInterval defines a time range
+                              within a restriction
+                            properties:
+                              endDay:
+                                description: End day (0 = Sunday, 6 = Saturday)
+                                type: integer
+                              endHour:
+                                description: End hour (0-23)
+                                type: integer
+                              startDay:
+                                description: Start day (0 = Sunday, 6 = Saturday)
+                                type: integer
+                              startHour:
+                                description: Start hour (0-23)
+                                type: integer
+                            required:
+                            - endDay
+                            - endHour
+                            - startDay
+                            - startHour
+                            type: object
+                          type: array
+                        type:
+                          description: Type of restriction (weekly, custom)
+                          type: string
+                      required:
+                      - intervals
+                      - type
+                      type: object
+                    type:
+                      description: Type of rotation (daily, weekly, hourly)
+                      type: string
+                  required:
+                  - length
+                  - name
+                  - participants
+                  - startDate
+                  - type
+                  type: object
+                type: array
+              timeZone:
+                description: TimeZone for the schedule (e.g., "UTC", "America/New_York")
+                type: string
+            required:
+            - name
+            - ownerTeam
+            - rotations
+            - timeZone
+            type: object
+          status:
+            description: OpsgenieScheduleStatus defines the observed state of an Opsgenie
+              Schedule
+            properties:
+              lastSyncedTime:
+                description: Last time the schedule was synced
+                format: date-time
+                type: string
+              scheduleId:
+                description: ID of the Opsgenie Schedule
+                type: string
+              status:
+                description: Current status of the schedule
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
