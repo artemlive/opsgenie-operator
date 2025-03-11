@@ -1,0 +1,160 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: opsgenieincidentrules.opsgenie.macpaw.dev
+spec:
+  group: opsgenie.macpaw.dev
+  names:
+    kind: OpsgenieIncidentRule
+    listKind: OpsgenieIncidentRuleList
+    plural: opsgenieincidentrules
+    singular: opsgenieincidentrule
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.ruleId
+      name: RuleID
+      type: string
+    - jsonPath: .status.status
+      name: Status
+      type: string
+    - jsonPath: .status.lastSyncedTime
+      name: Last Synced
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: OpsgenieIncidentRule is the Schema for the Opsgenie incident
+          rules API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OpsgenieIncidentRuleSpec defines the desired state of OpsgenieIncidentRule.
+            properties:
+              conditionMatchType:
+                description: Match type for the conditions (e.g., "match-all-conditions",
+                  "match-any-condition").
+                type: string
+              conditions:
+                description: Conditions that trigger this incident rule.
+                items:
+                  description: OpsgenieIncidentCondition defines the conditions for
+                    triggering an incident rule.
+                  properties:
+                    expectedValue:
+                      description: Expected value to match.
+                      type: string
+                    field:
+                      description: Field to evaluate (e.g., "message", "alias", "tags").
+                      type: string
+                    operation:
+                      description: Comparison operation (e.g., "equals", "contains",
+                        "startsWith").
+                      type: string
+                  required:
+                  - expectedValue
+                  - field
+                  - operation
+                  type: object
+                type: array
+              incidentProperties:
+                description: Properties of the incident created by this rule.
+                properties:
+                  description:
+                    description: Longer description of the incident.
+                    type: string
+                  details:
+                    additionalProperties:
+                      type: string
+                    description: Additional details as key-value pairs.
+                    type: object
+                  message:
+                    description: Message describing the incident.
+                    type: string
+                  priority:
+                    description: Priority level (e.g., P1, P2, P3).
+                    type: string
+                  stakeholderProperties:
+                    description: Stakeholder notification settings.
+                    properties:
+                      description:
+                        description: Description for stakeholders.
+                        type: string
+                      enable:
+                        description: Whether to enable stakeholder notifications.
+                        type: boolean
+                      message:
+                        description: Message sent to stakeholders.
+                        type: string
+                    required:
+                    - message
+                    type: object
+                  tags:
+                    description: Tags attached to the incident.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - message
+                - priority
+                - stakeholderProperties
+                type: object
+              serviceRef:
+                description: Reference to the Opsgenie Service this rule applies to.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - conditionMatchType
+            - conditions
+            - incidentProperties
+            - serviceRef
+            type: object
+          status:
+            description: OpsgenieIncidentRuleStatus defines the observed state of
+              an OpsgenieIncidentRule.
+            properties:
+              lastSyncedTime:
+                description: Last time the rule was synced.
+                format: date-time
+                type: string
+              ruleId:
+                description: ID of the created Opsgenie Incident Rule.
+                type: string
+              status:
+                description: Status of the incident rule (e.g., "Active").
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -4,4 +4,5 @@ resources:
 - opsgenie_v1beta1_opsgenieteam.yaml
 - opsgenie_v1beta1_opsgenieescalation.yaml
 - opsgenie_v1beta1_opsgenieschedule.yaml
+- opsgenie_v1beta1_opsgenieincidentrule.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

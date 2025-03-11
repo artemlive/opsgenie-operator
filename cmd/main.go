@@ -134,7 +134,6 @@ func main() {
 		fmt.Println("Failed to create Opsgenie schedule client:", err)
 		os.Exit(1)
 	}
-
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
@@ -280,6 +279,14 @@ func main() {
 		OpsgenieClient: scheduleClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OpsgenieSchedule")
+		os.Exit(1)
+	}
+	if err = (&controller.OpsgenieIncidentRuleReconciler{
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		OpsgenieClient: serviceClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "OpsgenieIncidentRule")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

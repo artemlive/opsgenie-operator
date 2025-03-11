@@ -6,6 +6,7 @@ resources:
 - bases/opsgenie.macpaw.dev_opsgenieteams.yaml
 - bases/opsgenie.macpaw.dev_opsgenieescalations.yaml
 - bases/opsgenie.macpaw.dev_opsgenieschedules.yaml
+- bases/opsgenie.macpaw.dev_opsgenieincidentrules.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

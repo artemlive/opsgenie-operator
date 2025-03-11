@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -38,6 +41,7 @@ type OpsgenieEscalationReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	OpsgenieClient *escalation.Client
+	Recorder       record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=opsgenie.macpaw.dev,resources=opsgenieescalations,verbs=get;list;watch;create;update;patch;delete
@@ -66,7 +70,7 @@ func (r *OpsgenieEscalationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	teamID, err := r.resolveTeamID(ctx, &escCR)
 	if err != nil {
 		logger.Error(err, "Failed to resolve team ID")
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, err
 	}
 	escCR.Status.ResolvedTeamID = teamID
 
@@ -75,73 +79,75 @@ func (r *OpsgenieEscalationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		logger.Error(err, "Failed to map escalation rules")
 		return ctrl.Result{}, err
 	}
-	// If escalation already exists, fetch it from Opsgenie
+
+	// Fetch escalation by ID if it's already set in status
+	var existingEscalation *escalation.GetResult
 	if escCR.Status.EscalationID != "" {
-		existingEscalation, err := r.OpsgenieClient.Get(ctx, &escalation.GetRequest{
+		existingEscalation, err = r.OpsgenieClient.Get(ctx, &escalation.GetRequest{
 			IdentifierType: escalation.Id,
 			Identifier:     escCR.Status.EscalationID,
 		})
 		if err != nil {
-			logger.Error(err, "Failed to fetch existing escalation from Opsgenie")
+			logger.Error(err, "Failed to fetch existing escalation from Opsgenie by ID")
+			r.Recorder.Event(&escCR, corev1.EventTypeWarning, "FailedFetching", fmt.Sprintf("Failed to fetch escalation: %v", err))
 			return ctrl.Result{}, err
-		}
-
-		// Check if an update is needed
-		if r.isUpdateRequired(&escCR, existingEscalation) {
-			logger.Info("Updating existing Opsgenie escalation", "escalationID", escCR.Status.EscalationID)
-			updateReq := &escalation.UpdateRequest{
-				IdentifierType: escalation.Id,
-				Identifier:     escCR.Status.EscalationID,
-				Name:           escCR.Spec.Name,
-				Description:    escCR.Spec.Description,
-				Rules:          mapOfRules,
-				OwnerTeam: &og.OwnerTeam{
-					Id: teamID,
-				},
-			}
-
-			if _, err := r.OpsgenieClient.Update(ctx, updateReq); err != nil {
-				logger.Error(err, "Failed to update Opsgenie escalation")
-				return ctrl.Result{}, err
-			}
-
-			// Update status
-			escCR.Status.LastSyncedTime = metav1.Now()
-			if err := r.Status().Update(ctx, &escCR); err != nil {
-				logger.Error(err, "Failed to update escalation status after update")
-				return ctrl.Result{}, err
-			}
-
-			logger.Info("Successfully updated Opsgenie escalation", "escalationID", escCR.Status.EscalationID)
 		}
 	} else {
-		// Create a new Opsgenie escalation
-		logger.Info("Creating new Opsgenie escalation", "name", escCR.Spec.Name)
+		// If there's no ID in status, try fetching the escalation by name
+		existingEscalation, err = r.OpsgenieClient.Get(ctx, &escalation.GetRequest{
+			IdentifierType: escalation.Name,
+			Identifier:     escCR.Spec.Name,
+		})
 
-		createReq := &escalation.CreateRequest{
-			Name:        escCR.Spec.Name,
-			Description: escCR.Spec.Description,
-			Rules:       mapOfRules,
-			OwnerTeam:   &og.OwnerTeam{Id: teamID},
+		// If found, import the existing escalation
+		if err == nil && existingEscalation.Escalation.Id != "" {
+			logger.Info("Importing existing Opsgenie escalation into CR", "name", escCR.Spec.Name, "escalationID", existingEscalation.Escalation.Id)
+
+			escCR.Status.EscalationID = existingEscalation.Escalation.Id
+			escCR.Status.Status = "Active"
+			escCR.Status.LastSyncedTime = metav1.Now()
+
+			if err := r.Status().Update(ctx, &escCR); err != nil {
+				logger.Error(err, "Failed to update CR status after importing existing escalation")
+				return ctrl.Result{}, err
+			}
 		}
-
-		createResp, err := r.OpsgenieClient.Create(ctx, createReq)
-		if err != nil {
-			logger.Error(err, "Failed to create Opsgenie escalation")
-			return ctrl.Result{}, err
-		}
-
-		// Update status with Escalation ID
-		escCR.Status.EscalationID = createResp.Id
-		escCR.Status.Status = "Active"
-		escCR.Status.LastSyncedTime = metav1.Now()
-		if err := r.Status().Update(ctx, &escCR); err != nil {
-			logger.Error(err, "Failed to update status after escalation creation")
-			return ctrl.Result{}, err
-		}
-
-		logger.Info("Successfully created Opsgenie escalation", "escalationID", createResp.Id)
 	}
+
+	// If the escalation exists, check if updates are needed
+	if existingEscalation != nil && existingEscalation.Escalation.Id != "" {
+		if r.isUpdateRequired(&escCR, existingEscalation) {
+			logger.Info("Updating existing Opsgenie escalation", "escalationID", existingEscalation.Escalation.Id)
+
+			if err := r.updateEscalation(ctx, &escCR, existingEscalation.Escalation.Id, teamID, mapOfRules); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	}
+
+	// If no escalation exists, create a new one
+	logger.Info("Creating new Opsgenie escalation", "name", escCR.Spec.Name)
+
+	createResp, err := r.createEscalation(ctx, &escCR, teamID, mapOfRules)
+	if err != nil {
+		logger.Error(err, "Failed to create Opsgenie escalation")
+		r.Recorder.Event(&escCR, corev1.EventTypeWarning, "FailedCreation", fmt.Sprintf("Failed to create escalation: %v", err))
+		return ctrl.Result{}, err
+	}
+
+	// Update status with Escalation ID
+	escCR.Status.EscalationID = createResp.Id
+	escCR.Status.Status = "Active"
+	escCR.Status.LastSyncedTime = metav1.Now()
+
+	if err := r.Status().Update(ctx, &escCR); err != nil {
+		logger.Error(err, "Failed to update status after escalation creation")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Successfully created Opsgenie escalation", "escalationID", createResp.Id)
 
 	// Requeue after 5 minutes to keep in sync
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
@@ -197,6 +203,38 @@ func (r *OpsgenieEscalationReconciler) resolveRecipientID(ctx context.Context, r
 	}
 
 	return "", "", errors.New("either id, username, teamRef, or scheduleRef must be specified")
+}
+
+func (r *OpsgenieEscalationReconciler) updateEscalation(ctx context.Context, escCR *opsgeniev1beta1.OpsgenieEscalation, escalationID string, teamID string, rules []escalation.RuleRequest) error {
+	updateReq := &escalation.UpdateRequest{
+		IdentifierType: escalation.Id,
+		Identifier:     escalationID,
+		Name:           escCR.Spec.Name,
+		Description:    escCR.Spec.Description,
+		Rules:          rules,
+		OwnerTeam: &og.OwnerTeam{
+			Id: teamID,
+		},
+	}
+
+	if _, err := r.OpsgenieClient.Update(ctx, updateReq); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to update Opsgenie escalation")
+		return err
+	}
+
+	escCR.Status.LastSyncedTime = metav1.Now()
+	return r.Status().Update(ctx, escCR)
+}
+
+func (r *OpsgenieEscalationReconciler) createEscalation(ctx context.Context, escCR *opsgeniev1beta1.OpsgenieEscalation, teamID string, rules []escalation.RuleRequest) (*escalation.CreateResult, error) {
+	createReq := &escalation.CreateRequest{
+		Name:        escCR.Spec.Name,
+		Description: escCR.Spec.Description,
+		Rules:       rules,
+		OwnerTeam:   &og.OwnerTeam{Id: teamID},
+	}
+
+	return r.OpsgenieClient.Create(ctx, createReq)
 }
 
 // mapEscalationRules converts Kubernetes CR rules to Opsgenie API format
@@ -278,6 +316,7 @@ func (r *OpsgenieEscalationReconciler) compareEscalationRules(crRules []opsgenie
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OpsgenieEscalationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("opsgenie-escalation-controller")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&opsgeniev1beta1.OpsgenieEscalation{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).

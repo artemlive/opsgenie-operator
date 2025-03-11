@@ -1,0 +1,9 @@
+apiVersion: opsgenie.macpaw.dev/v1beta1
+kind: OpsgenieIncidentRule
+metadata:
+  labels:
+    app.kubernetes.io/name: opsgenie-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: opsgenieincidentrule-sample
+spec:
+  # TODO(user): Add fields here

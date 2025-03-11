@@ -44,4 +44,13 @@ resources:
   kind: OpsgenieSchedule
   path: github.com/artemlive/opsgenie-operator/api/v1beta1
   version: v1beta1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: macpaw.dev
+  group: opsgenie
+  kind: OpsgenieIncidentRule
+  path: github.com/artemlive/opsgenie-operator/api/v1beta1
+  version: v1beta1
 version: "3"

@@ -44,104 +44,119 @@ type OpsgenieTeamReconciler struct {
 func (r *OpsgenieTeamReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the OpsgenieTeam resource
+	// Fetch the OpsgenieTeam resource from Kubernetes
 	var teamCR opsgeniev1beta1.OpsgenieTeam
 	if err := r.Get(ctx, req.NamespacedName, &teamCR); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// If the team already exists, fetch it from Opsgenie
-	if teamCR.Status.TeamID != "" {
-		existingTeam, err := r.OpsgenieClient.Get(ctx, &team.GetTeamRequest{
-			IdentifierType:  team.Id,
-			IdentifierValue: teamCR.Status.TeamID,
-		})
-		if err != nil {
-			logger.Error(err, "Failed to fetch existing team from Opsgenie")
-			return ctrl.Result{}, err
+	// Try to fetch the team from Opsgenie by name
+	existingTeam, err := r.OpsgenieClient.Get(ctx, &team.GetTeamRequest{
+		IdentifierType:  team.Name,
+		IdentifierValue: teamCR.Spec.Name,
+	})
+
+	// If the team exists, ensure our CR has the correct TeamID
+	if err == nil && existingTeam.Id != "" {
+		if teamCR.Status.TeamID != existingTeam.Id {
+			logger.Info("Importing existing Opsgenie team into CR", "name", teamCR.Spec.Name, "teamID", existingTeam.Id)
+
+			teamCR.Status.TeamID = existingTeam.Id
+			teamCR.Status.Status = "Active"
+			teamCR.Status.LastSyncedTime = metav1.Now()
+
+			if err := r.Status().Update(ctx, &teamCR); err != nil {
+				logger.Error(err, "Failed to update CR status after importing existing team")
+				return ctrl.Result{}, err
+			}
 		}
 
-		// Check if an update is needed
+		// Update team metadata if needed
 		if r.isUpdateRequired(&teamCR, existingTeam) {
 			logger.Info("Updating existing Opsgenie team", "teamID", teamCR.Status.TeamID)
 
-			updateReq := &team.UpdateTeamRequest{
-				Id:          teamCR.Status.TeamID,
-				Name:        teamCR.Spec.Name,
-				Description: teamCR.Spec.Description,
-			}
-
-			if _, err := r.OpsgenieClient.Update(ctx, updateReq); err != nil {
-				logger.Error(err, "Failed to update Opsgenie team")
+			if err := r.updateTeam(ctx, &teamCR, existingTeam.Id); err != nil {
 				return ctrl.Result{}, err
 			}
-
-			// Update status
-			teamCR.Status.LastSyncedTime = metav1.Now()
-			if err := r.Status().Update(ctx, &teamCR); err != nil {
-				logger.Error(err, "Failed to update team status after update")
-				return ctrl.Result{}, err
-			}
-
-			logger.Info("Successfully updated Opsgenie team", "teamID", teamCR.Status.TeamID)
 		}
 
-		// Check if members need an update
+		// Update team members if needed
 		if r.isMembersUpdateRequired(&teamCR, existingTeam) {
-			logger.Info("Updating team members", "teamID", teamCR.Status.TeamID)
+			logger.Info("Updating team members", "teamID", existingTeam.Id)
 
-			updateMembersReq := &team.UpdateTeamRequest{
-				Id:      teamCR.Status.TeamID,
-				Members: r.mapTeamMembers(teamCR.Spec.Members),
-			}
-
-			if _, err := r.OpsgenieClient.Update(ctx, updateMembersReq); err != nil {
-				logger.Error(err, "Failed to update Opsgenie team members")
+			if err := r.updateTeamMembers(ctx, &teamCR, existingTeam.Id); err != nil {
 				return ctrl.Result{}, err
 			}
-
-			// Update last synced timestamp
-			teamCR.Status.LastSyncedTime = metav1.Now()
-			if err := r.Status().Update(ctx, &teamCR); err != nil {
-				logger.Error(err, "Failed to update team status after members update")
-				return ctrl.Result{}, err
-			}
-
-			logger.Info("Successfully updated Opsgenie team members", "teamID", teamCR.Status.TeamID)
 		}
 
-	} else {
-		// Create a new Opsgenie team
-		logger.Info("Creating new Opsgenie team", "name", teamCR.Spec.Name)
-
-		createReq := &team.CreateTeamRequest{
-			Name:        teamCR.Spec.Name,
-			Description: teamCR.Spec.Description,
-			Members:     r.mapTeamMembers(teamCR.Spec.Members),
-		}
-
-		createResp, err := r.OpsgenieClient.Create(ctx, createReq)
-		if err != nil {
-			logger.Error(err, "Failed to create Opsgenie team")
-			return ctrl.Result{}, err
-		}
-
-		// Update status with Team ID
-		teamCR.Status.TeamID = createResp.Id
-		teamCR.Status.Status = "Active"
-		teamCR.Status.LastSyncedTime = metav1.Now()
-		if err := r.Status().Update(ctx, &teamCR); err != nil {
-			logger.Error(err, "Failed to update status after team creation")
-			return ctrl.Result{}, err
-		}
-
-		logger.Info("Successfully created Opsgenie team", "teamID", createResp.Id)
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
+
+	// If the team doesn't exist, create it
+	logger.Info("Creating new Opsgenie team", "name", teamCR.Spec.Name)
+
+	createResp, err := r.createTeam(ctx, &teamCR)
+	if err != nil {
+		logger.Error(err, "Failed to create Opsgenie team")
+		return ctrl.Result{}, err
+	}
+
+	// Update status with Team ID
+	teamCR.Status.TeamID = createResp.Id
+	teamCR.Status.Status = "Active"
+	teamCR.Status.LastSyncedTime = metav1.Now()
+
+	if err := r.Status().Update(ctx, &teamCR); err != nil {
+		logger.Error(err, "Failed to update status after team creation")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Successfully created Opsgenie team", "teamID", createResp.Id)
 
 	// Requeue after 5 minutes to keep in sync
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
+func (r *OpsgenieTeamReconciler) updateTeam(ctx context.Context, teamCR *opsgeniev1beta1.OpsgenieTeam, teamID string) error {
+	updateReq := &team.UpdateTeamRequest{
+		Id:          teamID,
+		Name:        teamCR.Spec.Name,
+		Description: teamCR.Spec.Description,
+	}
+
+	if _, err := r.OpsgenieClient.Update(ctx, updateReq); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to update Opsgenie team")
+		return err
+	}
+
+	teamCR.Status.LastSyncedTime = metav1.Now()
+	return r.Status().Update(ctx, teamCR)
+}
+
+func (r *OpsgenieTeamReconciler) updateTeamMembers(ctx context.Context, teamCR *opsgeniev1beta1.OpsgenieTeam, teamID string) error {
+	updateMembersReq := &team.UpdateTeamRequest{
+		Id:      teamID,
+		Members: r.mapTeamMembers(teamCR.Spec.Members),
+	}
+
+	if _, err := r.OpsgenieClient.Update(ctx, updateMembersReq); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to update Opsgenie team members")
+		return err
+	}
+
+	teamCR.Status.LastSyncedTime = metav1.Now()
+	return r.Status().Update(ctx, teamCR)
+}
+
+func (r *OpsgenieTeamReconciler) createTeam(ctx context.Context, teamCR *opsgeniev1beta1.OpsgenieTeam) (*team.CreateTeamResult, error) {
+	createReq := &team.CreateTeamRequest{
+		Name:        teamCR.Spec.Name,
+		Description: teamCR.Spec.Description,
+		Members:     r.mapTeamMembers(teamCR.Spec.Members),
+	}
+
+	return r.OpsgenieClient.Create(ctx, createReq)
+}
 func (r *OpsgenieTeamReconciler) mapTeamMembers(members []opsgeniev1beta1.OpsgenieTeamMember) []team.Member {
 	var opsgenieMembers []team.Member
 
